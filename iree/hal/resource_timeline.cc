@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IREE_HAL_RESOURCE_H_
-#define IREE_HAL_RESOURCE_H_
-
-#include "iree/base/ref_ptr.h"
+#include "iree/hal/resource_timeline.h"
 
 namespace iree {
 namespace hal {
 
-// Abstract resource type whose lifetime is managed by a ResourceSet.
-// Used mostly just to get a virtual dtor, though we could add nicer logging
-// by allowing resources to capture debug names, stack traces of creation, etc.
-class Resource : public RefObject<Resource> {
- public:
-  virtual ~Resource() = default;
-};
+ResourceTimeline::ResourceTimeline() = default;
+
+ResourceTimeline::~ResourceTimeline() = default;
+
+Status ResourceTimeline::AttachSet(ref_ptr<Semaphore> semaphore, uint64_t value,
+                                   ref_ptr<ResourceSet> resource_set) {
+  // DO NOT SUBMIT
+}
+
+Status ResourceTimeline::AdvanceSemaphore(SemaphoreValue semaphore_value) {
+  //
+}
+
+Status ResourceTimeline::AwakeFromIdle() {
+  //
+}
 
 }  // namespace hal
 }  // namespace iree
-
-#endif  // IREE_HAL_RESOURCE_H_

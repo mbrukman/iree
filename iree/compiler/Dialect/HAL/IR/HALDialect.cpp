@@ -59,7 +59,7 @@ HALDialect::HALDialect(MLIRContext *context)
 
   addTypes<AllocatorType, BufferType, CommandBufferType, DescriptorSetType,
            DescriptorSetLayoutType, DeviceType, EventType, ExecutableType,
-           ExecutableCacheType, FenceType, RingBufferType, SemaphoreType>();
+           ExecutableCacheType, SemaphoreType, RingBufferType>();
 
 #define GET_OP_LIST
   addOperations<
@@ -86,7 +86,6 @@ Type HALDialect::parseType(DialectAsmParser &parser) const {
           .Case("event", EventType::get(getContext()))
           .Case("executable", ExecutableType::get(getContext()))
           .Case("executable_cache", ExecutableCacheType::get(getContext()))
-          .Case("fence", FenceType::get(getContext()))
           .Case("ring_buffer", RingBufferType::get(getContext()))
           .Case("semaphore", SemaphoreType::get(getContext()))
           .Default(nullptr);
@@ -116,8 +115,6 @@ void HALDialect::printType(Type type, DialectAsmPrinter &p) const {
     p << "executable";
   } else if (type.isa<ExecutableCacheType>()) {
     p << "executable_cache";
-  } else if (type.isa<FenceType>()) {
-    p << "fence";
   } else if (type.isa<RingBufferType>()) {
     p << "ring_buffer";
   } else if (type.isa<SemaphoreType>()) {

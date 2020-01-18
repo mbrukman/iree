@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef IREE_HAL_RESOURCE_H_
-#define IREE_HAL_RESOURCE_H_
-
-#include "iree/base/ref_ptr.h"
+#include "iree/hal/resource_set.h"
 
 namespace iree {
 namespace hal {
 
-// Abstract resource type whose lifetime is managed by a ResourceSet.
-// Used mostly just to get a virtual dtor, though we could add nicer logging
-// by allowing resources to capture debug names, stack traces of creation, etc.
-class Resource : public RefObject<Resource> {
- public:
-  virtual ~Resource() = default;
-};
+ResourceSet::ResourceSet() = default;
+
+ResourceSet::~ResourceSet() = default;
+
+Status ResourceSet::Insert(ref_ptr<Resource> resource) {
+  // DO NOT SUBMIT
+}
+
+Status ResourceSet::Union(const ResourceSet& other_set) {
+  //
+}
 
 }  // namespace hal
 }  // namespace iree
-
-#endif  // IREE_HAL_RESOURCE_H_

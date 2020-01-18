@@ -55,6 +55,9 @@ extern void populateHALExecutableToVMPatterns(
 extern void populateHALExperimentalToVMPatterns(
     MLIRContext *context, SymbolTable &importSymbols,
     TypeConverter &typeConverter, OwningRewritePatternList &patterns);
+extern void populateHALSemaphoreToVMPatterns(
+    MLIRContext *context, SymbolTable &importSymbols,
+    TypeConverter &typeConverter, OwningRewritePatternList &patterns);
 extern void populateHALVariableToVMPatterns(MLIRContext *context,
                                             SymbolTable &importSymbols,
                                             TypeConverter &typeConverter,
@@ -75,6 +78,8 @@ void populateHALToVMPatterns(MLIRContext *context, SymbolTable &importSymbols,
                                     patterns);
   populateHALExperimentalToVMPatterns(context, importSymbols, typeConverter,
                                       patterns);
+  populateHALSemaphoreToVMPatterns(context, importSymbols, typeConverter,
+                                   patterns);
   populateHALVariableToVMPatterns(context, importSymbols, typeConverter,
                                   patterns);
 }

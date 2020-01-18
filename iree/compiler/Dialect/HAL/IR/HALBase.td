@@ -275,18 +275,6 @@ def HAL_ExecutableCache : DialectType<
   }];
 }
 
-def HAL_Fence : DialectType<
-    HAL_Dialect,
-    CPred<"$_self.isa<IREE::HAL::FenceType>()">,
-    "fence"> {
-  let typeDescription = [{
-    Synchronization mechanism for device->host notification.
-    Fences behave like timeline semaphores and contain a monotonically
-    increasing uint64_t payload. They may be waited on any number of times -
-    even if they have already been signaled.
-  }];
-}
-
 def HAL_RingBuffer : DialectType<
     HAL_Dialect,
     CPred<"$_self.isa<IREE::HAL::RingBufferType>()">,
@@ -301,9 +289,12 @@ def HAL_Semaphore : DialectType<
     CPred<"$_self.isa<IREE::HAL::SemaphoreType>()">,
     "semaphore"> {
   let typeDescription = [{
-    A synchronization primitive used to indicate submission dependencies.
-    Semaphores are either of type binary (signaled or unsignaled) or timeline
-    (uint64_t payload with >= semantics).
+    Synchronization mechanism for host->device, device->host, and host->host,
+    and device->device notification. Semaphores behave like Vulkan timeline
+    semaphores (or D3D12 fences) and contain a monotonically increasing
+    uint64_t payload. They may be waited on any number of times even if they
+    have already been signaled for a particular value. They may also be waited
+    on for a particular value prior to the signal for that value.
   }];
 }
 
@@ -446,21 +437,12 @@ def HAL_DescriptorSetBinding : NamedTupleOf<[
   }];
 }
 
-def HAL_FenceValue : NamedTupleOf<[
-    NamedTupleElement<0, "fence", RefPtrOf<HAL_Fence>>,
-    NamedTupleElement<1, "value", I64>
-  ], "FenceValue"> {
-  let typeDescription = [{
-    A reference to a fence and associated payload value.
-  }];
-}
-
 def HAL_SemaphoreValue : NamedTupleOf<[
     NamedTupleElement<0, "semaphore", RefPtrOf<HAL_Semaphore>>,
     NamedTupleElement<1, "value", I64>
   ], "SemaphoreValue"> {
   let typeDescription = [{
-    A reference to a timline semaphore and associated payload value.
+    A reference to a semaphore and associated payload value.
   }];
 }
 

@@ -1008,12 +1008,6 @@ def HAL_ExecutableBinaryEndOp : HAL_Op<"executable.binary_end", [
 // TODO(benvanik): executable cache.
 
 //===----------------------------------------------------------------------===//
-// iree::hal::Fence
-//===----------------------------------------------------------------------===//
-
-// TODO(benvanik): fence query.
-
-//===----------------------------------------------------------------------===//
 // iree::hal::RingBuffer
 //===----------------------------------------------------------------------===//
 
@@ -1023,6 +1017,106 @@ def HAL_ExecutableBinaryEndOp : HAL_Op<"executable.binary_end", [
 // iree::hal::Semaphore
 //===----------------------------------------------------------------------===//
 
-// TODO(benvanik): semaphore query/set.
+def HAL_SemaphoreCreateOp : HAL_Op<"semaphore.create", [
+    DeclareOpInterfaceMethods<OpAsmOpInterface>,
+  ]> {
+  let summary = [{semaphore allocation operation}];
+  let description = [{
+    Returns a semaphore from the device pool with the given initial value.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Device>:$device,
+    HAL_TimelineValue:$initial_value
+  );
+  let results = (outs
+    RefPtrOf<HAL_Semaphore>:$result
+  );
+
+  let skipDefaultBuilders = 1;
+  let builders = [
+    OpBuilder<[{
+      Builder *builder, OperationState &state, Value device,
+      int32_t initial_value
+    }]>,
+  ];
+}
+
+def HAL_SemaphoreStatusOp : HAL_PureOp<"semaphore.status"> {
+  let summary = [{semaphore asynchronous status check}];
+  let description = [{
+    Returns non-zero if the semaphore indicates a failure.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Semaphore>:$semaphore
+  );
+  let results = (outs
+    I32:$result
+  );
+}
+
+def HAL_SemaphoreQueryValueOp : HAL_Op<"semaphore.query_value"> {
+  let summary = [{semaphore payload value query}];
+  let description = [{
+    Queries the current payload and returns a tuple of `(status, value)`.
+    As the payload is monotonically increasing it is guaranteed that
+    the value is at least equal to the previous result of a
+    `hal.semaphore.signal` call and coherent with any waits for a
+    specified value via `hal.semaphore.await`.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Semaphore>:$semaphore
+  );
+  let results = (outs
+    I32:$status,
+    HAL_TimelineValue:$value
+  );
+}
+
+def HAL_SemaphoreSignalOp : HAL_Op<"semaphore.signal"> {
+  let summary = [{semaphore payload value signal operation}];
+  let description = [{
+    Signals the semaphore to the given payload value.
+    The call is ignored if the current payload value exceeds `new_value`.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Semaphore>:$semaphore,
+    HAL_TimelineValue:$new_value
+  );
+}
+
+def HAL_SemaphoreFailOp : HAL_Op<"semaphore.fail"> {
+  let summary = [{semaphore asynchronous failure operation}];
+  let description = [{
+    Signals the semaphore with a failure. The `status` will be returned from
+    `hal.semaphore.query_value` and `hal.semaphore.signal` for the lifetime
+    of the semaphore.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Semaphore>:$semaphore,
+    I32:$status
+  );
+}
+
+def HAL_SemaphoreAwaitOp : HAL_Op<"semaphore.await"> {
+  let summary = [{semaphore payload value signal operation}];
+  let description = [{
+    Yields the caller until the semaphore reaches or exceeds the specified
+    payload `value`. Returns the `status` of the semaphore after the wait, with
+    a non-zero value indicating failure.
+  }];
+
+  let arguments = (ins
+    RefPtrOf<HAL_Semaphore>:$semaphore,
+    HAL_TimelineValue:$value
+  );
+  let results = (outs
+    I32:$status
+  );
+}
 
 #endif  // IREE_DIALECT_HAL_OPS

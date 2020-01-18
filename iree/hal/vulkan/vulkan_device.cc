@@ -26,14 +26,13 @@
 #include "iree/base/tracing.h"
 #include "iree/hal/command_buffer_validation.h"
 #include "iree/hal/command_queue.h"
-#include "iree/hal/fence.h"
+#include "iree/hal/semaphore.h"
 #include "iree/hal/vulkan/direct_command_buffer.h"
 #include "iree/hal/vulkan/direct_command_queue.h"
 #include "iree/hal/vulkan/dynamic_symbols.h"
 #include "iree/hal/vulkan/extensibility_util.h"
-#include "iree/hal/vulkan/legacy_fence.h"
-#include "iree/hal/vulkan/native_binary_semaphore.h"
 #include "iree/hal/vulkan/native_event.h"
+#include "iree/hal/vulkan/native_timeline_semaphore.h"
 #include "iree/hal/vulkan/pipeline_cache.h"
 #include "iree/hal/vulkan/status_util.h"
 #include "iree/hal/vulkan/vma_allocator.h"
@@ -334,15 +333,11 @@ StatusOr<ref_ptr<VulkanDevice>> VulkanDevice::Create(
   auto command_queues = CreateCommandQueues(
       device_info, logical_device, compute_queue_set, transfer_queue_set, syms);
 
-  // TODO(b/140141417): implement timeline semaphore fences and switch here.
-  ASSIGN_OR_RETURN(auto legacy_fence_pool,
-                   LegacyFencePool::Create(add_ref(logical_device)));
-
   return assign_ref(new VulkanDevice(
       std::move(driver), device_info, physical_device,
       std::move(logical_device), std::move(allocator),
       std::move(command_queues), std::move(dispatch_command_pool),
-      std::move(transfer_command_pool), std::move(legacy_fence_pool)));
+      std::move(transfer_command_pool)));
 }
 
 // static
@@ -405,15 +400,10 @@ StatusOr<ref_ptr<VulkanDevice>> VulkanDevice::Wrap(
   auto command_queues = CreateCommandQueues(
       device_info, device_handle, compute_queue_set, transfer_queue_set, syms);
 
-  // TODO(b/140141417): implement timeline semaphore fences and switch here.
-  ASSIGN_OR_RETURN(auto legacy_fence_pool,
-                   LegacyFencePool::Create(add_ref(device_handle)));
-
   return assign_ref(new VulkanDevice(
       std::move(driver), device_info, physical_device, std::move(device_handle),
       std::move(allocator), std::move(command_queues),
-      std::move(dispatch_command_pool), std::move(transfer_command_pool),
-      std::move(legacy_fence_pool)));
+      std::move(dispatch_command_pool), std::move(transfer_command_pool)));
 }
 
 VulkanDevice::VulkanDevice(
@@ -422,8 +412,7 @@ VulkanDevice::VulkanDevice(
     std::unique_ptr<Allocator> allocator,
     absl::InlinedVector<std::unique_ptr<CommandQueue>, 4> command_queues,
     ref_ptr<VkCommandPoolHandle> dispatch_command_pool,
-    ref_ptr<VkCommandPoolHandle> transfer_command_pool,
-    ref_ptr<LegacyFencePool> legacy_fence_pool)
+    ref_ptr<VkCommandPoolHandle> transfer_command_pool)
     : Device(device_info),
       driver_(std::move(driver)),
       physical_device_(physical_device),
@@ -433,8 +422,7 @@ VulkanDevice::VulkanDevice(
       descriptor_pool_cache_(
           make_ref<DescriptorPoolCache>(add_ref(logical_device_))),
       dispatch_command_pool_(std::move(dispatch_command_pool)),
-      transfer_command_pool_(std::move(transfer_command_pool)),
-      legacy_fence_pool_(std::move(legacy_fence_pool)) {
+      transfer_command_pool_(std::move(transfer_command_pool)) {
   // Populate the queue lists based on queue capabilities.
   for (auto& command_queue : command_queues_) {
     if (command_queue->can_dispatch()) {
@@ -526,60 +514,98 @@ StatusOr<ref_ptr<Event>> VulkanDevice::CreateEvent() {
   return make_ref<NativeEvent>(add_ref(logical_device_), event_handle);
 }
 
-StatusOr<ref_ptr<BinarySemaphore>> VulkanDevice::CreateBinarySemaphore(
-    bool initial_value) {
-  IREE_TRACE_SCOPE0("VulkanDevice::CreateBinarySemaphore");
+StatusOr<ref_ptr<Semaphore>> VulkanDevice::CreateSemaphore(
+    uint64_t initial_value) {
+  IREE_TRACE_SCOPE0("VulkanDevice::CreateSemaphore");
+
+  VkSemaphoreTypeCreateInfo timeline_create_info;
+  timeline_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+  timeline_create_info.pNext = nullptr;
+  timeline_create_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+  timeline_create_info.initialValue = initial_value;
 
   VkSemaphoreCreateInfo create_info;
   create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  create_info.pNext = nullptr;
-  create_info.flags = initial_value ? VK_FENCE_CREATE_SIGNALED_BIT : 0;
+  create_info.pNext = &timeline_create_info;
+  create_info.flags = 0;
   VkSemaphore semaphore_handle = VK_NULL_HANDLE;
   VK_RETURN_IF_ERROR(syms()->vkCreateSemaphore(*logical_device_, &create_info,
                                                logical_device_->allocator(),
                                                &semaphore_handle));
 
-  return make_ref<NativeBinarySemaphore>(add_ref(logical_device_),
-                                         semaphore_handle);
+  return make_ref<NativeTimelineSemaphore>(add_ref(logical_device_),
+                                           semaphore_handle, initial_value);
 }
 
-StatusOr<ref_ptr<TimelineSemaphore>> VulkanDevice::CreateTimelineSemaphore(
-    uint64_t initial_value) {
-  IREE_TRACE_SCOPE0("VulkanDevice::CreateTimelineSemaphore");
-
-  // TODO(b/140141417): implement timeline semaphores.
-  return UnimplementedErrorBuilder(IREE_LOC)
-         << "Timeline semaphores not yet implemented";
+Status VulkanDevice::WaitAllSemaphores(
+    absl::Span<const SemaphoreValue> semaphores, absl::Time deadline) {
+  IREE_TRACE_SCOPE0("VulkanDevice::WaitAllSemaphores");
+  return WaitSemaphores(semaphores, deadline, /*wait_flags=*/0);
 }
 
-StatusOr<ref_ptr<Fence>> VulkanDevice::CreateFence(uint64_t initial_value) {
-  IREE_TRACE_SCOPE0("VulkanDevice::CreateFence");
-
-  // TODO(b/140141417): implement timeline semaphore fences and switch here.
-  // NOTE: we'll want some magic factory so that we can cleanly compile out the
-  // legacy implementation and pool.
-
-  return make_ref<LegacyFence>(add_ref(legacy_fence_pool_), initial_value);
+StatusOr<int> VulkanDevice::WaitAnySemaphore(
+    absl::Span<const SemaphoreValue> semaphores, absl::Time deadline) {
+  IREE_TRACE_SCOPE0("VulkanDevice::WaitAnySemaphore");
+  return WaitSemaphores(semaphores, deadline,
+                        /*wait_flags=*/VK_SEMAPHORE_WAIT_ANY_BIT);
 }
 
-Status VulkanDevice::WaitAllFences(absl::Span<const FenceValue> fences,
-                                   absl::Time deadline) {
-  IREE_TRACE_SCOPE0("VulkanDevice::WaitAllFences");
+Status VulkanDevice::WaitSemaphores(absl::Span<const SemaphoreValue> semaphores,
+                                    absl::Time deadline,
+                                    VkSemaphoreWaitFlags wait_flags) {
+  IREE_TRACE_SCOPE0("VulkanDevice::WaitSemaphores");
 
-  // TODO(b/140141417): implement timeline semaphore fences and switch here.
+  absl::InlinedVector<VkSemaphore, 4> semaphores(semaphores.size());
+  absl::InlinedVector<uint64_t, 4> values(semaphores.size());
+  for (int i = 0; i < semaphores.size(); ++i) {
+    semaphores[i] =
+        static_cast<NativeTimelineSemaphore*>(semaphores[i].semaphore)
+            ->handle();
+    values[i] = semaphores[i].value;
+  }
 
-  return LegacyFence::WaitForFences(logical_device_.get(), fences,
-                                    /*wait_all=*/true, deadline);
-}
+  VkSemaphoreWaitInfo wait_info;
+  wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+  wait_info.pNext = nullptr;
+  wait_info.flags = wait_flags;
+  wait_info.semaphoreCount = semaphores.size();
+  wait_info.pSemaphores = semaphores.data();
+  wait_info.pValues = values.data();
 
-StatusOr<int> VulkanDevice::WaitAnyFence(absl::Span<const FenceValue> fences,
-                                         absl::Time deadline) {
-  IREE_TRACE_SCOPE0("VulkanDevice::WaitAnyFence");
+  uint64_t timeout_nanos;
+  if (deadline == absl::InfiniteFuture()) {
+    timeout_nanos = UINT64_MAX;
+  } else if (deadline == absl::InfinitePast()) {
+    timeout_nanos = 0;
+  } else {
+    auto relative_nanos = absl::ToInt64Nanoseconds(deadline - absl::Now());
+    timeout_nanos = relative_nanos < 0 ? 0 : relative_nanos;
+  }
 
-  // TODO(b/140141417): implement timeline semaphore fences and switch here.
+  // NOTE: this may fail with a timeout (VK_TIMEOUT) or in the case of a device
+  // loss event may return either VK_SUCCESS *or* VK_ERROR_DEVICE_LOST.
+  // We may want to explicitly query for device loss after a successful wait
+  // to ensure we consistently return errors.
+  VkResult result =
+      syms()->vkWaitSemaphores(*logical_device_, &wait_info, timeout_nanos);
+  if (result == VK_ERROR_DEVICE_LOST) {
+    // Nothing we do now matters.
+    return VkResultToStatus(result);
+  }
 
-  return LegacyFence::WaitForFences(logical_device_.get(), fences,
-                                    /*wait_all=*/false, deadline);
+  // Regardless of the result we want to check if any of the semaphores
+  // completed. This ensures we clean up any resources we can as early as
+  // possible.
+  for (int i = 0; i < semaphores.size(); ++i) {
+    uint64_t current_value = 0;
+    VK_RETURN_IF_ERROR(syms()->vkGetSemaphoreCounterValue(
+        *logical_device_, semaphores[i], &current_value));
+    RETURN_IF_ERROR(
+        static_cast<NativeTimelineSemaphore*>(semaphores[i].semaphore)
+            ->AdvanceValue(current_value));
+  }
+
+  return OkStatus();
 }
 
 Status VulkanDevice::WaitIdle(absl::Time deadline) {
@@ -591,7 +617,7 @@ Status VulkanDevice::WaitIdle(absl::Time deadline) {
     return OkStatus();
   }
 
-  IREE_TRACE_SCOPE0("VulkanDevice::WaitIdle#Fences");
+  IREE_TRACE_SCOPE0("VulkanDevice::WaitIdle#Semaphores");
   for (auto& command_queue : command_queues_) {
     RETURN_IF_ERROR(command_queue->WaitIdle(deadline));
   }

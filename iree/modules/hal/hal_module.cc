@@ -357,12 +357,13 @@ Status HALModuleState::ExSubmitAndWait(
 
   auto* device_ptr = reinterpret_cast<Device*>(device.get());
   auto* queue = device_ptr->dispatch_queues().front();
-  ASSIGN_OR_RETURN(auto fence, device_ptr->CreateFence(0u));
+  ASSIGN_OR_RETURN(auto semaphore, device_ptr->CreateSemaphore(0u));
   SubmissionBatch batch;
   CommandBuffer* command_buffers[1] = {
       reinterpret_cast<CommandBuffer*>(command_buffer.get())};
   batch.command_buffers = absl::MakeConstSpan(command_buffers);
-  RETURN_IF_ERROR(queue->Submit(batch, {fence.get(), 1u}));
+  batch.signal_semaphores = {{semaphore.get(), 1u}};
+  RETURN_IF_ERROR(queue->Submit(batch));
   RETURN_IF_ERROR(queue->WaitIdle());
 
   for (auto& ref : deferred_releases_) {

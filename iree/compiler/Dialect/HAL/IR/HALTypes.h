@@ -140,15 +140,6 @@ class ExecutableCacheType
   }
 };
 
-class FenceType : public Type::TypeBase<FenceType, RefObjectType> {
- public:
-  using Base::Base;
-  static FenceType get(MLIRContext *context) {
-    return Base::get(context, TypeKind::Fence);
-  }
-  static bool kindof(unsigned kind) { return kind == TypeKind::Fence; }
-};
-
 class RingBufferType : public Type::TypeBase<RingBufferType, RefObjectType> {
  public:
   using Base::Base;

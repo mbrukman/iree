@@ -50,7 +50,6 @@ enum Kind {
   Event,
   Executable,
   ExecutableCache,
-  Fence,
   RingBuffer,
   Semaphore,
 };

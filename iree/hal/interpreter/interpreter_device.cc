@@ -21,28 +21,28 @@
 #include "iree/base/tracing.h"
 #include "iree/hal/command_buffer_validation.h"
 #include "iree/hal/command_queue.h"
-#include "iree/hal/fence.h"
 #include "iree/hal/host/async_command_queue.h"
 #include "iree/hal/host/host_event.h"
 #include "iree/hal/host/host_submission_queue.h"
 #include "iree/hal/host/inproc_command_buffer.h"
 #include "iree/hal/interpreter/bytecode_cache.h"
 #include "iree/hal/interpreter/interpreter_command_processor.h"
+#include "iree/hal/semaphore.h"
 
 namespace iree {
 namespace hal {
 
 namespace {
 
-// A CommandQueue that performs no synchronization (semaphores/fences) and just
+// A CommandQueue that performs no synchronization and just
 // directly executes command buffers inline.
 //
 // This is meant to be wrapped by SyncCommandQueue or AsyncCommandQueue that
 // themselves perform the synchronization/threading/etc. As such we ignore
 // all semaphores in the provided batches under the assumption that if Submit is
 // being called then all dependencies are valid. The wrapping queue is also
-// responsible for signaling the fence as well as propagating errors in a way
-// that is dependent on how it is performing its synchronization.
+// responsible for signaling the semaphore as well as propagating errors in a
+// way that is dependent on how it is performing its synchronization.
 class UnsynchronizedCommandQueue final : public CommandQueue {
  public:
   UnsynchronizedCommandQueue(Allocator* allocator, std::string name,
@@ -52,21 +52,21 @@ class UnsynchronizedCommandQueue final : public CommandQueue {
   ~UnsynchronizedCommandQueue() override = default;
 
   Status Submit(absl::Span<const SubmissionBatch> batches,
-                FenceValue fence) override {
+                SemaphoreValue semaphore) override {
     IREE_TRACE_SCOPE0("UnsynchronizedCommandQueue::Submit");
-    DCHECK_EQ(nullptr, fence.first)
-        << "Fences must be handled by the wrapping queue";
+    DCHECK_EQ(nullptr, semaphore.first)
+        << "Semaphores must be handled by the wrapping queue";
 
     // Process command buffers and propagate errors asynchronously through the
-    // fence. This ensures that even if we are running synchronously we still
-    // get consistent failure behavior with drivers that are purely async.
+    // semaphore. This ensures that even if we are running synchronously we
+    // still get consistent failure behavior with drivers that are purely async.
     for (auto& batch : batches) {
       DCHECK(batch.wait_semaphores.empty() && batch.signal_semaphores.empty())
           << "Semaphores must be handled by the wrapping queue";
       RETURN_IF_ERROR(ProcessCommandBuffers(batch.command_buffers));
     }
 
-    // NOTE: fence is ignored here.
+    // NOTE: semaphore is ignored here.
     return OkStatus();
   }
 
@@ -129,37 +129,24 @@ StatusOr<ref_ptr<Event>> InterpreterDevice::CreateEvent() {
   return make_ref<HostEvent>();
 }
 
-StatusOr<ref_ptr<BinarySemaphore>> InterpreterDevice::CreateBinarySemaphore(
-    bool initial_value) {
-  IREE_TRACE_SCOPE0("InterpreterDevice::CreateBinarySemaphore");
-  return make_ref<HostBinarySemaphore>(initial_value);
-}
-
-StatusOr<ref_ptr<TimelineSemaphore>> InterpreterDevice::CreateTimelineSemaphore(
+StatusOr<ref_ptr<Semaphore>> InterpreterDevice::CreateSemaphore(
     uint64_t initial_value) {
-  IREE_TRACE_SCOPE0("InterpreterDevice::CreateTimelineSemaphore");
-
-  // TODO(b/140141417): implement timeline semaphores.
-  return UnimplementedErrorBuilder(IREE_LOC)
-         << "Timeline semaphores not yet implemented";
+  IREE_TRACE_SCOPE0("InterpreterDevice::CreateSemaphore");
+  return make_ref<HostSemaphore>(initial_value);
 }
 
-StatusOr<ref_ptr<Fence>> InterpreterDevice::CreateFence(
-    uint64_t initial_value) {
-  IREE_TRACE_SCOPE0("InterpreterDevice::CreateFence");
-  return make_ref<HostFence>(initial_value);
+Status InterpreterDevice::WaitAllSemaphores(
+    absl::Span<const SemaphoreValue> semaphores, absl::Time deadline) {
+  IREE_TRACE_SCOPE0("InterpreterDevice::WaitAllSemaphores");
+  return HostSemaphore::WaitForSemaphores(semaphores, /*wait_all=*/true,
+                                          deadline);
 }
 
-Status InterpreterDevice::WaitAllFences(absl::Span<const FenceValue> fences,
-                                        absl::Time deadline) {
-  IREE_TRACE_SCOPE0("InterpreterDevice::WaitAllFences");
-  return HostFence::WaitForFences(fences, /*wait_all=*/true, deadline);
-}
-
-StatusOr<int> InterpreterDevice::WaitAnyFence(
-    absl::Span<const FenceValue> fences, absl::Time deadline) {
-  IREE_TRACE_SCOPE0("InterpreterDevice::WaitAnyFence");
-  return HostFence::WaitForFences(fences, /*wait_all=*/false, deadline);
+StatusOr<int> InterpreterDevice::WaitAnySemaphore(
+    absl::Span<const SemaphoreValue> semaphores, absl::Time deadline) {
+  IREE_TRACE_SCOPE0("InterpreterDevice::WaitAnySemaphore");
+  return HostSemaphore::WaitForSemaphores(semaphores, /*wait_all=*/false,
+                                          deadline);
 }
 
 Status InterpreterDevice::WaitIdle(absl::Time deadline) {
